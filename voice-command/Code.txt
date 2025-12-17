@@ -1,0 +1,159 @@
+import speech_recognition as sr
+import subprocess
+import pygame
+import time
+import psutil
+import os
+from ctypes import POINTER, cast
+from comtypes import CLSCTX_ALL
+from pycaw.pycaw import AudioUtilities, IAudioEndpointVolume
+
+# Ses dosyalarının tam yolu
+ses_dosyasi = "baslat.mp3"
+onay_dosyasi = "onay.mp3"
+basarili_dosyasi = "basarili.mp3"
+
+# Ses sistemi başlat
+pygame.mixer.init()
+
+# Açılabilecek uygulamalar
+uygulamalar = {
+    "notepad": "notepad.exe",
+    "hesap makinesi": "calc.exe",
+    "opera": r"C:\Users\berat\AppData\Local\Programs\Opera GX\opera.exe",
+    "discord": r"C:\Users\berat\AppData\Local\Discord\Update.exe"
+}
+
+# Uygulamalara ait işlem isimleri (kapatmak için)
+proses_eslesmeleri = {
+    "notepad": ["notepad.exe"],
+    "hesap makinesi": ["Calculator.exe", "ApplicationFrameHost.exe"],
+    "opera": ["opera.exe"],
+    "discord": ["Update.exe", "Discord.exe"]
+}
+
+# Ses kontrol sistemi
+devices = AudioUtilities.GetSpeakers()
+interface = devices.Activate(IAudioEndpointVolume.iid, CLSCTX_ALL, None)
+volume = cast(interface, POINTER(IAudioEndpointVolume))
+
+def ses_artir():
+    current_volume = volume.GetMasterVolumeLevelScalar()
+    yeni_volume = min(1.0, current_volume + 0.10)
+    volume.SetMasterVolumeLevelScalar(yeni_volume, None)
+    print(f">> Ses artırıldı. Yeni seviye: {int(yeni_volume*100)}%")
+    ses_basari_oynat()
+
+def ses_azalt():
+    current_volume = volume.GetMasterVolumeLevelScalar()
+    yeni_volume = max(0.0, current_volume - 0.10)
+    volume.SetMasterVolumeLevelScalar(yeni_volume, None)
+    print(f">> Ses azaltıldı. Yeni seviye: {int(yeni_volume*100)}%")
+    ses_basari_oynat()
+
+def ses_basari_oynat():
+    pygame.mixer.music.load(basarili_dosyasi)
+    pygame.mixer.music.play()
+    time.sleep(1)
+
+def uygulama_kapat(app_name):
+    if app_name not in proses_eslesmeleri:
+        print(f">> {app_name} tanımlı değil.")
+        return False
+    kapandi = False
+    hedef_prosesler = proses_eslesmeleri[app_name]
+    for proc in psutil.process_iter(['name']):
+        try:
+            if proc.info['name'] and proc.info['name'].lower() in [p.lower() for p in hedef_prosesler]:
+                proc.terminate()
+                kapandi = True
+        except (psutil.NoSuchProcess, psutil.AccessDenied):
+            continue
+    if kapandi:
+        print(f">> {app_name} kapatıldı.")
+        ses_basari_oynat()
+    else:
+        print(f">> {app_name} çalışmıyor veya bulunamadı.")
+    return kapandi
+
+def uygulama_ac(app_name):
+    if app_name not in uygulamalar:
+        print(f">> {app_name} tanımlı değil.")
+        return False
+    try:
+        subprocess.Popen(uygulamalar[app_name])
+        print(f">> {app_name} açılıyor...")
+        ses_basari_oynat()
+        return True
+    except Exception as e:
+        print(f">> {app_name} açılamadı: {e}")
+        return False
+
+r = sr.Recognizer()
+mic = sr.Microphone()
+
+def ses_al(mesaj=">> Dinleniyor..."):
+    with mic as source:
+        print(mesaj)
+        r.adjust_for_ambient_noise(source)
+        audio = r.listen(source)
+    try:
+        komut = r.recognize_google(audio, language="tr-TR")
+        print(f"KOMUT: {komut}")
+        return komut.lower()
+    except sr.UnknownValueError:
+        print(">> Anlaşılamadı.")
+        return ""
+    except sr.RequestError:
+        print(">> Google servisine ulaşılamıyor.")
+        return ""
+
+def main():
+    pygame.mixer.music.load(ses_dosyasi)
+    pygame.mixer.music.play()
+    time.sleep(1)
+
+    print(">> 'bilgisayar' diyerek komut modunu başlatabilirsiniz.")
+
+    komut_modu = False
+
+    while True:
+        if not komut_modu:
+            wake_word = ses_al(">> Komut bekleniyor...")
+            if wake_word.strip() == "bilgisayar":
+                komut_modu = True
+                print(">> Komut modu aktif!")
+                pygame.mixer.music.load(onay_dosyasi)
+                pygame.mixer.music.play()
+                time.sleep(1)
+        else:
+            komut = ses_al(">> Komutunuzu söyleyin:")
+            if komut == "":
+                continue
+
+            for app in uygulamalar.keys():
+                if f"{app} aç" in komut:
+                    uygulama_ac(app)
+                    break
+            for app in proses_eslesmeleri.keys():
+                if f"{app} kapat" in komut:
+                    uygulama_kapat(app)
+                    break
+            if "ses aç" in komut:
+                ses_artir()
+            elif "ses kıs" in komut:
+                ses_azalt()
+            elif "bilgisayarı kapat" in komut:
+                print(">> Bilgisayar kapatılıyor...")
+                ses_basari_oynat()
+                time.sleep(2)
+                os.system("shutdown /s /t 5")
+                break
+            elif "çıkış" in komut or "kapat" in komut:
+                print(">> Komut modu kapatıldı.")
+                komut_modu = False
+            else:
+                print(">> Anlaşılamayan komut.")
+
+if _name_ == "_main_":
+    main()
